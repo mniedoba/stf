@@ -85,13 +85,13 @@ def training_loop(
                             )
     net = dnnlib.util.construct_class_by_name(**network_kwargs, **interface_kwargs) # subclass of torch.nn.Module
     net.train().requires_grad_(True).to(device)
-    if dist.get_rank() == 0:
-        B = batch_size // dist.get_world_size()
-        with torch.no_grad():
-            images = torch.zeros([B, net.img_channels, net.img_resolution, net.img_resolution], device=device)
-            sigma = torch.ones([B], device=device)
-            labels = torch.zeros([B, net.label_dim], device=device)
-            misc.print_module_summary(net, [images, sigma, labels], max_nesting=2)
+    # if dist.get_rank() == 0:
+    #     B = batch_size // dist.get_world_size()
+    #     with torch.no_grad():
+    #         images = torch.zeros([B, net.img_channels, net.img_resolution, net.img_resolution], device=device)
+    #         sigma = torch.ones([B], device=device)
+    #         labels = torch.zeros([B, net.label_dim], device=device)
+    #         misc.print_module_summary(net, [images, sigma, labels], max_nesting=2)
     # Setup optimizer.
     dist.print0('Setting up optimizer...')
     loss_fn = dnnlib.util.construct_class_by_name(**loss_kwargs) # training.loss.(VP|VE|EDM)Loss
