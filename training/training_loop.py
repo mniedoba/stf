@@ -16,6 +16,7 @@ import psutil
 import numpy as np
 import torch
 import dnnlib
+import wandb
 from torch_utils import distributed as dist
 from torch_utils import training_stats
 from torch_utils import misc
@@ -161,7 +162,7 @@ def training_loop(
                 loss = loss_fn(net=ddp, images=batch_images, labels=batch_labels, augment_pipe=augment_pipe, stf=stf,
                                ref_images=images)
                 training_stats.report('Loss/loss', loss)
-                dist.print0("loss:", loss.mean().item())
+                # dist.print0("loss:", loss.mean().item())
                 loss.sum().mul(loss_scaling / (batch_size // dist.get_world_size())).backward()
 
         # Update weights.
@@ -208,25 +209,32 @@ def training_loop(
             dist.print0('Aborting...')
 
         # Save network snapshot.
-        if (state_dump_ticks is not None) and (done or cur_tick % state_dump_ticks == 0) and cur_tick != 0:
-        #if True:
-            #data = dict(ema=ema, loss_fn=loss_fn, augment_pipe=augment_pipe, dataset_kwargs=dict(dataset_kwargs))
-            data = dict(optimizer_state=optimizer.state_dict(), step=cur_nimg, ema=ema, net=net)
+        if (snapshot_ticks is not None) and (
+                done or cur_tick % snapshot_ticks == 0 and cur_tick != 0):
+            data = dict(ema=ema, augment_pipe=augment_pipe,
+                        dataset_kwargs=dict(dataset_kwargs))
             for key, value in data.items():
                 if isinstance(value, torch.nn.Module):
                     value = copy.deepcopy(value).eval().requires_grad_(False)
                     misc.check_ddp_consistency(value)
                     data[key] = value.cpu()
-                del value # conserve memory
+                del value  # conserve memory
             if dist.get_rank() == 0:
-                with open(os.path.join(run_dir, f'training-state-{cur_nimg//1000:06d}.pkl'), 'wb') as f:
+                fname = os.path.join(run_dir,
+                                     f'network-snapshot-{cur_nimg // 1000:06d}.pkl')
+                with open(fname, 'wb') as f:
                     pickle.dump(data, f)
-            del data # conserve memory
+                wandb.save(fname)
+            del data  # conserve memory
 
-        # # Save full dump of the training state.
-        # if (state_dump_ticks is not None) and (done or cur_tick % state_dump_ticks == 0) and cur_tick != 0 and dist.get_rank() == 0:
-        #     torch.save(dict(optimizer_state=optimizer.state_dict(), step=cur_nimg, ema=ema),
-        #                os.path.join(run_dir, f'training-state-{cur_nimg//1000:06d}.pt'))
+        # Save full dump of the training state.
+        if (state_dump_ticks is not None) and (
+                done or cur_tick % state_dump_ticks == 0) and cur_tick != 0 and dist.get_rank() == 0:
+            fname = os.path.join(run_dir,
+                                 f'training-state-{cur_nimg // 1000:06d}.pt')
+            torch.save(dict(net=net, optimizer_state=optimizer.state_dict()),
+                       fname)
+            wandb.save(fname)
 
         # Update logs.
         training_stats.default_collector.update()
@@ -235,6 +243,17 @@ def training_loop(
                 stats_jsonl = open(os.path.join(run_dir, 'stats.jsonl'), 'at')
             stats_jsonl.write(json.dumps(dict(training_stats.default_collector.as_dict(), timestamp=time.time())) + '\n')
             stats_jsonl.flush()
+
+        # Log to W&B.
+        if dist.get_rank() == 0:
+            metric_dict = training_stats.default_collector.as_dict()
+            log_dict = {}
+            for k in metric_dict:
+                for sub_k in metric_dict[k]:
+                    log_k = f'{k}_{sub_k}'
+                    log_dict[log_k] = metric_dict[k][sub_k]
+            wandb.log(metric_dict, step=(cur_nimg // 1000))
+
         dist.update_progress(cur_nimg // 1000, total_kimg)
 
         # Update state.

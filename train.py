@@ -14,6 +14,7 @@ import json
 import click
 import torch
 import dnnlib
+import wandb
 from torch_utils import distributed as dist
 from training import training_loop
 
@@ -224,6 +225,16 @@ def main(**kwargs):
     if opts.dry_run:
         dist.print0('Dry run; exiting.')
         return
+
+    # Setup W&B.
+    if dist.get_rank() == 0:
+        assert 'WANDB_ENTITY' in os.environ
+        assert 'WANDB_PROJECT' in os.environ
+        wandb.init(
+            entity=os.environ['WANDB_ENTITY'],
+            project=os.environ['WANDB_PROJECT'],
+            config=c,
+        )
 
     # Create output directory.
     dist.print0('Creating output directory...')
