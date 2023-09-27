@@ -86,8 +86,10 @@ class EDMLoss:
         D_yn = net(y + n, sigma, labels, augment_labels=augment_labels)
 
         if stf:
-            ref_images[len(y):], augment_labels_2 = augment_pipe(ref_images[len(y):]) \
-                if augment_pipe is not None else (images, None)
+            ref_y = ref_images[len(y):]
+            if augment_pipe is not None:
+                ref_y, _ = augment_pipe(ref_images[len(y):])
+            ref_images[len(y):] = ref_y
             # update augmented original images
             ref_images[:len(y)] = y
             target = self.stf_targets(sigma.squeeze(), y+n, ref_images)
